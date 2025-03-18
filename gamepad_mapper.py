@@ -4,16 +4,20 @@ import threading
 import time
 import pyautogui
 import queue
+import tkinter as tk
+import sys
 
-# 초기화
+# 전역 변수: 프로그램 종료 여부
+running = True
+
+# pygame 초기화 (게임패드 입력 처리를 위해)
 pygame.init()
 pygame.joystick.init()
 
-# 게임패드 연결 확인
 if pygame.joystick.get_count() == 0:
     print("❌ 연결된 게임패드가 없습니다. 프로그램을 종료합니다.")
     pygame.quit()
-    exit()
+    sys.exit()
 
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
@@ -21,8 +25,8 @@ print(f"🎮 감지된 게임패드: {joystick.get_name()}")
 
 # 설정값
 MOUSE_SENSITIVITY = 20        # 좌측 조이스틱 마우스 이동 민감도
-SCROLL_SENSITIVITY = 10       # 우측 조이스틱 스크롤 민감도 (증가)
-DEADZONE_THRESHOLD = 0.15     # 데드존: 이 값 이하의 입력은 무시
+SCROLL_SENSITIVITY = 10       # 우측 조이스틱 스크롤 민감도
+DEADZONE_THRESHOLD = 0.2      # 데드존: 이 값 이하의 입력은 무시
 SMOOTHING_FACTOR = 0.2        # 보간 계수 (부드러운 이동)
 
 # 스레드 간 이벤트 전달용 큐 생성
@@ -39,11 +43,20 @@ scroll_accumulator = 0
 def move_mouse(dx, dy):
     ctypes.windll.user32.mouse_event(0x0001, int(dx), int(dy), 0, 0)
 
+# 진동 함수: times 횟수만큼 duration(ms) 동안 진동 후 pause(ms) 만큼 대기
+def vibrate(times, duration=200, pause=100):
+    for _ in range(times):
+        try:
+            joystick.rumble(0.5, 0.5, duration)
+        except Exception as e:
+            print("진동 기능 에러:", e)
+        time.sleep(pause / 1000.0)
+
 # 좌측 조이스틱 스레드 (마우스 이동)
 def left_joystick_thread():
-    global prev_x, prev_y
+    global prev_x, prev_y, running
     clock = pygame.time.Clock()
-    while True:
+    while running:
         try:
             _ = left_queue.get(timeout=0.01)
         except queue.Empty:
@@ -73,9 +86,9 @@ def left_joystick_thread():
 
 # 우측 조이스틱 스레드 (스크롤)
 def right_joystick_thread():
-    global scroll_accumulator
+    global scroll_accumulator, running
     clock = pygame.time.Clock()
-    while True:
+    while running:
         try:
             _ = right_queue.get(timeout=0.01)
         except queue.Empty:
@@ -93,52 +106,78 @@ def right_joystick_thread():
             scroll_accumulator -= scroll_amount
         clock.tick(120)
 
-# 버튼 처리 스레드 (클릭 및 더블 클릭, 진동 추가)
+# 버튼 처리 스레드 (클릭, 윈도우 탭, 진동 추가)
 def button_thread_func():
-    while True:
+    global running
+    while running:
         try:
             event = button_queue.get(timeout=0.01)
         except queue.Empty:
             time.sleep(0.005)
             continue
 
+        # A 버튼: 단일 클릭 + 한 번 진동
         if event.button == 0:
             pyautogui.click()
             print("A 버튼 눌림: 단일 클릭 실행")
-            try:
-                joystick.rumble(0.5, 0.5, 200)  # 0.5 강도의 진동, 200ms 지속
-            except Exception as e:
-                print("진동 기능 에러:", e)
+            vibrate(1)
+        # B 버튼: 더블 클릭 + 두 번 진동
         elif event.button == 1:
             pyautogui.doubleClick()
             print("B 버튼 눌림: 더블 클릭 실행")
-            try:
-                joystick.rumble(0.5, 0.5, 200)
-            except Exception as e:
-                print("진동 기능 에러:", e)
+            vibrate(2)
+        # Y 버튼: Win+Tab 실행 + 세 번 진동
+        elif event.button == 3:
+            pyautogui.hotkey('win', 'tab')
+            print("Y 버튼 눌림: 윈도우 탭 실행")
+            vibrate(3)
         time.sleep(0.005)
 
-# 각 입력 처리 스레드 실행
-left_thread = threading.Thread(target=left_joystick_thread, daemon=True)
-right_thread = threading.Thread(target=right_joystick_thread, daemon=True)
-btn_thread = threading.Thread(target=button_thread_func, daemon=True)
+# pygame 이벤트 큐에서 이벤트를 읽어 각 큐에 분배하는 스레드
+def pygame_event_dispatcher():
+    global running
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.JOYAXISMOTION:
+                # 좌측: 축 0,1 / 우측: 축 3 (필요시 조정)
+                if event.axis in [0, 1]:
+                    left_queue.put(event)
+                elif event.axis == 3:
+                    right_queue.put(event)
+            elif event.type == pygame.JOYBUTTONDOWN:
+                button_queue.put(event)
+            elif event.type == pygame.QUIT:
+                running = False
+        time.sleep(0.005)
 
-left_thread.start()
-right_thread.start()
-btn_thread.start()
+# 각 스레드 실행 (데몬 스레드로 설정하여 메인 스레드 종료 시 함께 종료)
+threading.Thread(target=left_joystick_thread, daemon=True).start()
+threading.Thread(target=right_joystick_thread, daemon=True).start()
+threading.Thread(target=button_thread_func, daemon=True).start()
+threading.Thread(target=pygame_event_dispatcher, daemon=True).start()
 
-# 메인 스레드: pygame 이벤트 큐에서 이벤트를 읽어 각 큐에 분배
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.JOYAXISMOTION:
-            # 좌측: 축 0,1 / 우측: 축 3 (필요시 조정)
-            if event.axis in [0, 1]:
-                left_queue.put(event)
-            elif event.axis == 3:
-                right_queue.put(event)
-        elif event.type == pygame.JOYBUTTONDOWN:
-            button_queue.put(event)
-        elif event.type == pygame.QUIT:
-            pygame.quit()
-            exit()
-    time.sleep(0.005)
+# tkinter GUI 생성 (메인 스레드에서 실행)
+def on_exit():
+    global running
+    running = False
+    pygame.quit()
+    root.destroy()
+    sys.exit()
+
+root = tk.Tk()
+root.title("Gamepad Mapper Control Panel")
+root.geometry("300x150")
+
+# 실행 상태 메시지
+label = tk.Label(root, text="Gamepad Mapper is running.", font=("Arial", 12))
+label.pack(pady=10)
+
+# 키 할당 정보를 추가한 라벨 (영어로 간단하게 명시)
+assignment_label = tk.Label(root, text="Key Assignments: A=Click, B=Double Click, Y=Win+Tab", font=("Arial", 10))
+assignment_label.pack(pady=5)
+
+exit_button = tk.Button(root, text="Exit", command=on_exit, width=10, font=("Arial", 12))
+exit_button.pack(pady=10)
+
+# tkinter 메인 루프 시작 (사용자가 Exit 버튼을 누르면 on_exit() 호출)
+root.mainloop()

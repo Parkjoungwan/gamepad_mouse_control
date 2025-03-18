@@ -1,0 +1,14 @@
+# PyInstaller build directories
+build/
+dist/
+
+# PyInstaller spec file
+gamepad_mapper.spec
+
+# Python cache files
+*.pyc
+__pycache__/
+
+# Virtual environment directories (optional)
+venv/
+env/
