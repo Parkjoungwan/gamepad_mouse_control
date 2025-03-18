@@ -25,7 +25,7 @@ print(f"🎮 감지된 게임패드: {joystick.get_name()}")
 
 # 설정값
 MOUSE_SENSITIVITY = 20        # 좌측 조이스틱 마우스 이동 민감도
-SCROLL_SENSITIVITY = 10       # 우측 조이스틱 스크롤 민감도
+SCROLL_SENSITIVITY = 95       # 우측 조이스틱 스크롤 민감도
 DEADZONE_THRESHOLD = 0.2      # 데드존: 이 값 이하의 입력은 무시
 SMOOTHING_FACTOR = 0.2        # 보간 계수 (부드러운 이동)
 
@@ -106,7 +106,7 @@ def right_joystick_thread():
             scroll_accumulator -= scroll_amount
         clock.tick(120)
 
-# 버튼 처리 스레드 (클릭, 윈도우 탭, 진동 추가)
+# 버튼 처리 스레드 (클릭, 윈도우 탭, 브라우저 내 앞으로/뒤로, 진동 추가)
 def button_thread_func():
     global running
     while running:
@@ -131,6 +131,16 @@ def button_thread_func():
             pyautogui.hotkey('win', 'tab')
             print("Y 버튼 눌림: 윈도우 탭 실행")
             vibrate(3)
+        # L 버튼: Alt+Left (브라우저 뒤로가기) + 한 번 진동
+        elif event.button == 9:
+            pyautogui.hotkey('alt', 'left')
+            print("L 버튼 눌림: 브라우저 뒤로가기 실행")
+            vibrate(1)
+        # R 버튼: Alt+Right (브라우저 앞으로가기) + 한 번 진동
+        elif event.button == 10:
+            pyautogui.hotkey('alt', 'right')
+            print("R 버튼 눌림: 브라우저 앞으로가기 실행")
+            vibrate(1)
         time.sleep(0.005)
 
 # pygame 이벤트 큐에서 이벤트를 읽어 각 큐에 분배하는 스레드
@@ -168,12 +178,15 @@ root = tk.Tk()
 root.title("Gamepad Mapper Control Panel")
 root.geometry("300x150")
 
+# WM_DELETE_WINDOW 프로토콜 설정: 창의 X 버튼을 눌러 닫을 때 on_exit 호출
+root.protocol("WM_DELETE_WINDOW", on_exit)
+
 # 실행 상태 메시지
 label = tk.Label(root, text="Gamepad Mapper is running.", font=("Arial", 12))
 label.pack(pady=10)
 
 # 키 할당 정보를 추가한 라벨 (영어로 간단하게 명시)
-assignment_label = tk.Label(root, text="Key Assignments: A=Click, B=Double Click, Y=Win+Tab", font=("Arial", 10))
+assignment_label = tk.Label(root, text="Key Assignments: A=Click, B=Double Click, Y=Win+Tab, L=Alt+Left, R=Alt+Right", font=("Arial", 10))
 assignment_label.pack(pady=5)
 
 exit_button = tk.Button(root, text="Exit", command=on_exit, width=10, font=("Arial", 12))
